@@ -1,0 +1,83 @@
+{
+  "offsets": {
+    "1": -0.138,
+    "2": -0.46,
+    "3": 0.205,
+    "4": 1.614,
+    "5": -0.582,
+    "6": 0.448,
+    "7": -1.087
+  },
+  "azimuths": {
+    "1": 0.0,
+    "2": 300.047,
+    "3": 248.08,
+    "4": 189.156,
+    "5": 141.308,
+    "6": 91.529,
+    "7": 41.712
+  },
+  "counter_clockwise": true,
+  "ring_coherence_ccw": 0.9969,
+  "ring_coherence_cw": 0.0347,
+  "spacing_deg": [
+    41.71,
+    49.82,
+    49.78,
+    47.85,
+    58.92,
+    51.97,
+    59.95
+  ],
+  "spacing_sd_deg": 5.88,
+  "ideal_spacing_deg": 51.43,
+  "rms_angle_error_deg": 10.82,
+  "fundamental_db": {
+    "1": 0.908,
+    "2": 1.067,
+    "3": 1.25,
+    "4": 0.894,
+    "5": 1.057,
+    "6": 0.892,
+    "7": 1.011
+  },
+  "meta": {
+    "tool": "h1 fundamental-phase fit (scratchpad/multifreq1800.py), NOT dfcal solve()",
+    "band": "LTE1800 downlink",
+    "freqs_hz": [
+      1805000000.0,
+      1810000000.0,
+      1815000000.0,
+      1820000000.0,
+      1825000000.0,
+      1830000000.0,
+      1835000000.0,
+      1840000000.0,
+      1845000000.0,
+      1850000000.0,
+      1855000000.0,
+      1860000000.0,
+      1865000000.0,
+      1870000000.0,
+      1875000000.0,
+      1880000000.0
+    ],
+    "n_freqs": 16,
+    "n_angles": 36,
+    "steps_per_rev": 16000,
+    "dir_plus": "cw",
+    "rotates": "array",
+    "ports": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "null_port": 8,
+    "created": "2026-08-20T16:18:55",
+    "caveat": "Boresights come from the complex FUNDAMENTAL of each port's level-vs-rotation curve, averaged over 16 LTE1800 carriers. This has NOT been through dfcal's hold-out --check-angles accuracy test, so there is no independent error bar on it yet. Gains are band-averaged and are frequency-dependent on this array: do not reuse them below ~1.7 GHz."
+  }
+}
