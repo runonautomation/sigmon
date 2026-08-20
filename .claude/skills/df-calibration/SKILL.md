@@ -199,29 +199,47 @@ permutation sense correct in 48/48. If `--simulate` degrades, the solver broke,
 not the rig. `dfstream.py`'s segmentation is pure numpy and runs against a
 recorded `--iq-out` file, so DF logic is testable with no radio attached.
 
-## USB power is a real failure mode on this Pi — check the bus first
+## THE Pi 5 USB CURRENT CAP — check this before blaming the radio
 
-**Observed 2026-08-20.** Mid-sweep the B210 died with
-`LIBUSB_ERROR_NO_DEVICE`, then `Failed to read EEPROM (-9)`. It was not a
-radio fault: plugging a **CUAV-X7 flight controller** into the same Pi pushed
-the B210 off USB 3.0 (Bus 005) onto a shared USB 2.0 bus (Bus 004), where it
-and the ESP32 switch both began re-enumerating continuously.
+**Root-caused 2026-08-20.** This is a **Raspberry Pi 5 Model B Rev 1.0** with:
 
-Diagnose it by watching the **device number climb** — it increments on every
-re-enumeration:
-
-```bash
-watch -n2 'lsusb | grep -E "2500:0020|303a:1001"'
+```
+/sys/firmware/devicetree/base/chosen/power/usb_max_current_enable = 0
 ```
 
-Numbers rising over minutes (007 -> 031, or 012 -> 018) mean the link is
-flapping. A `USBDEVFS_RESET` ioctl will NOT fix it; the cause is power.
+With that flag clear, the Pi 5 caps **total current across all four USB ports
+at 600 mA**. A B210 draws more than that on its own, and more again when
+streaming. Nothing about the radio is faulty.
 
-- Keep the **B210 on a USB 3.0 port** (Bus 005 here). It needs the bandwidth
-  for 16 MS/s regardless, and the 3.0 port has the better supply.
-- Give the flight controller its own supply or a **powered hub**.
-- A dropped radio mid-sweep wastes the whole turn — check the bus is quiet
-  before starting a run that takes minutes.
+Symptoms, all of which were observed and all of which mislead:
+
+- `Failed to read EEPROM (-9 / -1)` and `Could not load firmware:
+  ihex_reader::read(): record handler returned failure code` at discovery —
+  **intermittent**, so retrying "works" and hides the cause.
+- `usb rx8 transfer status: LIBUSB_TRANSFER_NO_DEVICE` **the instant streaming
+  starts** — enumeration is low-draw, streaming is not.
+- The **whole bus collapses**, taking unrelated devices with it. Adding a CUAV-X7
+  flight controller was enough to push it over and kill the B210 too.
+- `iProduct = WestBridge` (Cypress FX3 boot-loader). This is the **normal cold
+  state** — UHD downloads `usrp_b200_fw.hex` at discovery — so it is NOT
+  evidence of a dead radio. Healthy after load: `LibreSDR_B210mini`.
+- USB device numbers climbing (007 -> 031, 012 -> 018) = re-enumeration flapping.
+
+### Fix, in order of reliability
+
+1. **Powered USB hub for the B210.** Works regardless of Pi PSU. Preferred.
+2. Official **27 W (5 V/5 A) PSU**, then set in `/boot/firmware/config.txt`:
+   `usb_max_current_enable=1` and reboot. Raises the budget to 1.6 A.
+   **Do not set this without a genuine 5 A supply** — it can brown out the Pi.
+3. Keep the B210 on a **USB 3.0 (blue) port, alone**. Independently of power,
+   the default `--rate 16e6` needs ~64 MB/s, which exceeds USB 2.0 (~40 MB/s).
+   A healthy run logs `Operating over USB 3.` Confirm with:
+   `lsusb -v -d 2500:0020 | grep Negotiated` -> SuperSpeed, not High Speed.
+4. Unplug the flight controller during RF runs; read its compass separately.
+
+`b2xx_fx3_utils` is **not installed** here (only `uhd_images_downloader`), so
+there is no software path to force a firmware load. A `USBDEVFS_RESET` ioctl
+does not help — the cause is power, not a wedged endpoint.
 
 ## Absolute bearings from the flight controller
 
