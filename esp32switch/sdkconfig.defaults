@@ -1,0 +1,23 @@
+# Shared across targets. Per-chip settings live in sdkconfig.defaults.<target>,
+# which ESP-IDF loads automatically on top of this file.
+#
+#   idf.py set-target esp32c3     (default)
+#   idf.py set-target esp32s3
+
+# Roomier main task: wifi + httpd + console all start from app_main
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# 4MB flash, single app with a large partition
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# Both DevKit families expose the console on native USB
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Query strings carry the control parameters, so allow a little headroom
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# Sub-millisecond dwells are timed by busy-waiting in the iterate task, which
+# starves the idle task. Keep the interrupt watchdog, drop the idle check.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n

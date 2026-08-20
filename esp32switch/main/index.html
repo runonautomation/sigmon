@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-C3 RF Switch</title>
+<style>
+  :root {
+    --bg: #12151a; --card: #1b2027; --line: #2b323c;
+    --fg: #e6eaf0; --dim: #8c97a5; --accent: #4da3ff; --on: #35d07f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6f9; --card: #ffffff; --line: #dde2e9;
+      --fg: #1a1f26; --dim: #66707e; --accent: #0b62d0; --on: #0f9d58;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 14px;
+  }
+  h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+       color: var(--dim); margin: 0 0 12px; font-weight: 600; }
+  .ports { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .port {
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 4px;
+    text-align: center; cursor: pointer; background: transparent; color: var(--fg);
+    font: inherit; transition: background .12s, border-color .12s;
+  }
+  .port:hover { border-color: var(--accent); }
+  .port .n { display: block; font-size: 16px; font-weight: 600; }
+  .port .p { display: block; font-size: 11px; color: var(--dim);
+             font-family: ui-monospace, Menlo, monospace; margin-top: 1px; }
+  .port[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: var(--accent);
+  }
+  .port[aria-pressed="true"] .p { color: var(--fg); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  input[type=number], input[type=text], select {
+    padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); font: inherit; min-width: 0;
+  }
+  input[type=number], input[type=text] { flex: 1; }
+  button.act {
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--fg); font: inherit; cursor: pointer;
+    white-space: nowrap;
+  }
+  button.act:hover { border-color: var(--accent); }
+  button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 8px; }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .switch { position: relative; width: 46px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .slider {
+    position: absolute; inset: 0; border-radius: 999px; background: var(--line);
+    pointer-events: none; transition: background .15s;
+  }
+  .slider::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    border-radius: 50%; background: #fff; transition: transform .15s;
+  }
+  .switch input:checked + .slider { background: var(--on); }
+  .switch input:checked + .slider::after { transform: translateX(20px); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+  dt { color: var(--dim); }
+  dd { margin: 0; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+  .lines { display: flex; gap: 6px; }
+  .bit { padding: 1px 7px; border-radius: 5px; border: 1px solid var(--line); font-size: 12px; }
+  .bit.hi { background: var(--on); border-color: var(--on); color: #04240f; }
+  #msg { min-height: 18px; font-size: 12px; color: var(--dim); text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP32-C3 RF Switch</h1>
+  <div class="sub">SP8T &mdash; 3 control lines, 8 ports</div>
+
+  <div class="card">
+    <h2>Hold a port</h2>
+    <div class="ports" id="ports"></div>
+    <div class="hint">Selecting a port stops iteration and holds that path.</div>
+  </div>
+
+  <div class="card">
+    <h2>Dwell time</h2>
+    <div class="row">
+      <input type="number" id="dwell" min="1" step="1">
+      <select id="unit">
+        <option value="1">ns</option>
+        <option value="1000">&micro;s</option>
+        <option value="1000000">ms</option>
+        <option value="1000000000">s</option>
+      </select>
+      <button class="act primary" id="applyDwell">Apply</button>
+    </div>
+    <div class="hint" id="dwellHint">Time held on each port while iterating.</div>
+  </div>
+
+  <div class="card">
+    <h2>Iterate</h2>
+    <div class="toggle">
+      <span>Walk the sequence, one dwell per port</span>
+      <label class="switch"><input type="checkbox" id="iterate"><span class="slider"></span></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="seq" placeholder="1 2 3 6 7, 1-5 or 001,010,011">
+      <button class="act" id="applySeq">Set</button>
+      <button class="act" id="stepBtn">Step</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="hint" style="margin:0">Or just switch between the first</span>
+      <input type="number" id="count" min="1" style="flex:0 0 72px" value="5">
+      <span class="hint" style="margin:0">ports</span>
+      <button class="act" id="applyCount">Set</button>
+    </div>
+    <div class="hint">Ports, ranges or 3-bit patterns, up to 16 entries. Step advances one place.</div>
+  </div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <dl>
+      <dt>Port</dt><dd id="s-port">&mdash;</dd>
+      <dt>Lines</dt><dd><span class="lines" id="s-lines"></span></dd>
+      <dt>GPIO</dt><dd id="s-gpio">&mdash;</dd>
+      <dt>Dwell</dt><dd id="s-dwell">&mdash;</dd>
+      <dt>Changes</dt><dd id="s-steps">&mdash;</dd>
+      <dt>Station</dt><dd id="s-sta">&mdash;</dd>
+      <dt>SoftAP</dt><dd id="s-ap">&mdash;</dd>
+    </dl>
+  </div>
+
+  <div id="msg"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let editing = null;   /* id of the field the user is typing in */
+let ports = 8;
+
+function note(text, bad) {
+  const el = $('msg');
+  el.textContent = text || '';
+  el.style.color = bad ? '#ff6b6b' : 'var(--dim)';
+}
+
+/* Filled from /api/state so the truth table lives only on the device. */
+let codes = [];
+function patternFor(port) {
+  return codes[port - 1] || '---';
+}
+
+function humanNs(ns) {
+  if (ns >= 1e9) return (ns / 1e9).toFixed(3).replace(/\.?0+$/, '') + ' s';
+  if (ns >= 1e6) return (ns / 1e6).toFixed(3).replace(/\.?0+$/, '') + ' ms';
+  if (ns >= 1e3) return (ns / 1e3).toFixed(3).replace(/\.?0+$/, '') + ' µs';
+  return ns + ' ns';
+}
+
+function buildPorts() {
+  $('ports').innerHTML = Array.from({ length: ports }, (_, i) => {
+    const p = i + 1;
+    return '<button class="port" data-port="' + p + '">' +
+           '<span class="n">' + p + '</span>' +
+           '<span class="p">' + patternFor(p) + '</span></button>';
+  }).join('');
+}
+
+function render(s) {
+  if (s.codes && s.codes.join() !== codes.join()) { codes = s.codes; buildPorts(); }
+  if (s.ports && s.ports !== ports) { ports = s.ports; buildPorts(); }
+
+  for (const b of document.querySelectorAll('.port')) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.port) === s.port));
+  }
+
+  if (editing !== 'dwell') {
+    const unit = Number($('unit').value) || 1;
+    $('dwell').value = s.dwell_ns / unit;
+  }
+  if (editing !== 'seq') $('seq').value = s.seq.join(' ');
+  $('count').max = s.ports;
+  $('iterate').checked = s.iterate;
+
+  $('dwellHint').textContent = 'Time held on each port while iterating. Range ' +
+    humanNs(s.dwell_min) + ' to ' + humanNs(s.dwell_max) + '.';
+
+  $('s-port').textContent = s.port + '  (' + s.pattern + ')' +
+    (s.iterate ? '  iterating, step ' + (s.seq_idx + 1) + '/' + s.seq.length : '  held');
+  $('s-lines').innerHTML = ['L1', 'L2', 'L3'].map((name, i) => {
+    const hi = s.pattern[i] === '1';
+    return '<span class="bit' + (hi ? ' hi' : '') + '">' + name + ' ' + s.pattern[i] + '</span>';
+  }).join('');
+  $('s-gpio').textContent = 'L1=' + s.gpio[0] + '  L2=' + s.gpio[1] + '  L3=' + s.gpio[2];
+  $('s-dwell').textContent = s.dwell_ns + ' ns  (' + humanNs(s.dwell_ns) + ')';
+  $('s-steps').textContent = s.steps;
+  $('s-sta').textContent = s.sta.connected ? s.sta.ssid + ' @ ' + s.sta.ip
+    : (s.sta.ssid ? 'connecting to ' + s.sta.ssid : 'not configured');
+  $('s-ap').textContent = s.ap.ssid + ' @ ' + s.ap.ip;
+}
+
+async function send(params) {
+  try {
+    const r = await fetch('/api/set?' + new URLSearchParams(params), { method: 'POST' });
+    const text = await r.text();
+    if (!r.ok) { note(text || ('HTTP ' + r.status), true); return; }
+    render(JSON.parse(text));
+    note('');
+  } catch (e) {
+    note('request failed: ' + e.message, true);
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    if (r.ok) render(await r.json());
+  } catch (e) { /* keep the last view on a dropped poll */ }
+}
+
+buildPorts();
+
+$('ports').addEventListener('click', (e) => {
+  const b = e.target.closest('.port');
+  if (b) send({ port: b.dataset.port });
+});
+$('applyDwell').addEventListener('click', () => {
+  const unit = Number($('unit').value) || 1;
+  const ns = Math.round(Number($('dwell').value) * unit);
+  if (!Number.isFinite(ns) || ns < 1) { note('enter a positive dwell', true); return; }
+  editing = null;
+  send({ dwell_ns: String(ns) });
+});
+$('applySeq').addEventListener('click', () => {
+  editing = null;
+  send({ seq: $('seq').value.trim() });
+});
+$('applyCount').addEventListener('click', () => {
+  editing = null;
+  send({ count: $('count').value });
+});
+$('stepBtn').addEventListener('click', () => send({ step: 1 }));
+$('iterate').addEventListener('change', () => send({ iterate: $('iterate').checked ? 1 : 0 }));
+
+for (const id of ['dwell', 'seq', 'count']) {
+  $(id).addEventListener('focus', () => { editing = id; });
+  $(id).addEventListener('blur', () => { if (editing === id) editing = null; });
+  $(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      $({ dwell: 'applyDwell', seq: 'applySeq', count: 'applyCount' }[id]).click();
+    }
+  });
+}
+$('unit').addEventListener('change', () => { editing = null; poll(); });
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

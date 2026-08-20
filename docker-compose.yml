@@ -1,0 +1,51 @@
+# MongoDB for sigmon.
+#
+#   cp env.example .env      # then edit the password
+#   docker compose up -d
+#   ./sigmon.py 88M 108M --stability-report
+#
+# Mongo applies MONGO_INITDB_ROOT_* on FIRST volume init only. If the volume
+# already exists the credentials here are ignored -- `docker compose down -v`
+# to start clean (destroys stored signals) or create the user by hand.
+services:
+  mongo:
+    image: mongo:7
+    container_name: sigmon-mongo
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - sigmon_mongo:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-sigmon}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-sigmon}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-signals}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'mongosh -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet --eval "db.runCommand({ping:1}).ok" || exit 1',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Optional browser for poking at the data: docker compose --profile ui up -d
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: sigmon-mongo-express
+    profiles: ["ui"]
+    restart: unless-stopped
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER:-sigmon}:${MONGO_PASSWORD:-sigmon}@mongo:27017/?authSource=admin
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-sigmon}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-sigmon}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  sigmon_mongo:

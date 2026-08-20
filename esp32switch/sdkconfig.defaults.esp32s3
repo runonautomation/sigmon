@@ -1,0 +1,9 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# Full clock: busy_wait_ns() scales off CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# The S3 is dual-core; pin the busy-wait iterate task to APP_CPU so the
+# protocol core keeps servicing WiFi without fighting it for the CPU.
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n

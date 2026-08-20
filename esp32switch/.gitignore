@@ -1,0 +1,6 @@
+build/
+sdkconfig
+sdkconfig.old
+test/host/test_switch
+__pycache__/
+*.pyc

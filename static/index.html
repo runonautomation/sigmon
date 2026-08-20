@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sigmon — spectrum · waterfall · DF</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3;
+    --dim:#8b949e; --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+         padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.02em}
+  .sp{flex:1}
+  .pill{padding:2px 8px;border:1px solid var(--line);border-radius:10px;color:var(--dim)}
+  .pill b{color:var(--fg);font-weight:600}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  main{display:grid;grid-template-columns:1fr 340px;gap:12px;padding:12px;
+       align-items:start}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+        padding:10px;min-width:0}
+  .card h2{font-size:12px;margin:0 0 8px;color:var(--dim);font-weight:600;
+           text-transform:uppercase;letter-spacing:.06em}
+  canvas{display:block;width:100%;border-radius:4px;background:#010409}
+  #spec{height:230px;cursor:crosshair}
+  #fall{height:280px;cursor:crosshair;image-rendering:pixelated}
+  #polar{height:260px;background:transparent}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  label{color:var(--dim)}
+  input,button,select{background:#0d1117;color:var(--fg);border:1px solid var(--line);
+        border-radius:5px;padding:4px 7px;font:inherit}
+  input{width:88px}
+  button{cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);color:#04121f;border-color:var(--accent);
+                 font-weight:600}
+  button.primary:hover{opacity:.88;color:#04121f}
+  button.on{background:var(--ok);border-color:var(--ok);color:#04121f;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td{padding:2px 0}
+  td.k{color:var(--dim)} td.v{text-align:right}
+  .bar{height:7px;background:#21262d;border-radius:3px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  .big{font-size:30px;font-weight:600;letter-spacing:-.01em}
+  .note{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.45}
+  .err{color:var(--bad);font-size:11px;margin-top:6px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>sigmon</h1>
+  <span class="pill">status <b id="st">…</b></span>
+  <span class="pill">antennas <b id="ants">—</b></span>
+  <span class="pill">sweep <b id="ms">—</b></span>
+  <span class="pill">store <b id="store">—</b></span>
+  <span class="sp"></span>
+  <span class="pill" id="cursor">—</span>
+</header>
+
+<main>
+  <div>
+    <div class="card">
+      <h2>Spectrum — click to pick a frequency</h2>
+      <canvas id="spec"></canvas>
+      <div class="row">
+        <label>start</label><input id="f0" value="88">
+        <label>stop</label><input id="f1" value="108">
+        <label>MHz · gain</label><input id="gain" value="40" style="width:60px">
+        <button id="apply">apply</button>
+        <span class="sp"></span>
+        <label>ref</label><input id="ref" value="-40" style="width:56px">
+        <label>range</label><input id="rng" value="60" style="width:56px">
+        <label>dB</label>
+      </div>
+      <div class="err" id="cfgerr"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Waterfall</h2>
+      <canvas id="fall"></canvas>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Direction finding</h2>
+      <div class="row">
+        <input id="dffreq" value="" placeholder="MHz" style="width:96px">
+        <button class="primary" id="dfgo">DF once</button>
+        <button id="dfpin">pin ▶</button>
+      </div>
+      <canvas id="polar"></canvas>
+      <div style="text-align:center">
+        <div class="big" id="bearing">—</div>
+        <div style="color:var(--dim)" id="bsub">no measurement yet</div>
+      </div>
+      <table style="margin-top:10px">
+        <tr><td class="k">frequency</td><td class="v" id="d_f">—</td></tr>
+        <tr><td class="k">confidence</td><td class="v" id="d_c">—</td></tr>
+        <tr><td class="k">observations</td><td class="v" id="d_n">—</td></tr>
+        <tr><td class="k">circular mean</td><td class="v" id="d_m">—</td></tr>
+        <tr><td class="k">circular std</td><td class="v" id="d_s">—</td></tr>
+        <tr><td class="k">within this measurement</td><td class="v" id="d_w">—</td></tr>
+      </table>
+      <div class="note" id="dfnote"></div>
+      <div class="err" id="dferr"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Antenna</h2>
+      <div class="row" id="antrow"></div>
+      <div class="note" id="antnote">
+        Auto lets DF commutate the switch. Holding one port pins the spectrum
+        to that antenna and stops any running DF.
+      </div>
+      <div class="err" id="anterr"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Per-antenna levels</h2>
+      <div id="levels" style="color:var(--dim)">run a DF measurement</div>
+      <div class="note" id="balnote"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let STATE = {}, LAST = null, PINNED = null;
+let SPEC = null;                 // latest frame
+let REF = -40, RNG = 60;
+
+// ---- canvas sizing (HiDPI) -------------------------------------------
+function fit(c){
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(r.width*d) || c.height !== Math.round(r.height*d)){
+    c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
+  }
+  return c.getContext('2d');
+}
+
+// ---- colour map for the waterfall ------------------------------------
+// Dark blue -> cyan -> green -> yellow -> red. Monotonic in lightness so it
+// reads as an intensity ramp rather than a set of unrelated hues.
+function heat(t){
+  t = Math.max(0, Math.min(1, t));
+  const stops = [[8,12,30],[22,60,140],[16,150,160],[80,200,90],
+                 [240,210,70],[240,90,50],[255,235,225]];
+  const x = t*(stops.length-1), i = Math.min(stops.length-2, Math.floor(x)), f = x-i;
+  const a = stops[i], b = stops[i+1];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
+}
+
+// ---- spectrum --------------------------------------------------------
+function drawSpec(){
+  const c = $('#spec'), ctx = fit(c), W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#010409'; ctx.fillRect(0,0,W,H);
+  if (!SPEC || !SPEC.levels) return;
+  const L = SPEC.levels, n = L.length;
+  const top = REF, bot = REF - RNG;
+  const y = v => H - (v - bot)/(top-bot)*H;
+
+  // grid
+  ctx.strokeStyle = '#21262d'; ctx.fillStyle = '#6e7681';
+  ctx.lineWidth = 1; ctx.font = `${11*(window.devicePixelRatio||1)}px monospace`;
+  for (let d = Math.ceil(bot/10)*10; d <= top; d += 10){
+    const yy = Math.round(y(d))+.5;
+    ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke();
+    ctx.fillText(d+'', 4, yy-3);
+  }
+  const f0 = SPEC.f0/1e6, f1 = SPEC.f1/1e6;
+  const span = f1-f0, tick = span>50?10:span>20?5:span>5?2:1;
+  for (let f = Math.ceil(f0/tick)*tick; f <= f1; f += tick){
+    const xx = Math.round((f-f0)/span*W)+.5;
+    ctx.beginPath(); ctx.moveTo(xx,0); ctx.lineTo(xx,H); ctx.stroke();
+    ctx.fillText(f.toFixed(0), xx+3, H-4);
+  }
+
+  // trace + fill
+  ctx.beginPath();
+  for (let i=0;i<n;i++){
+    const v = L[i]; if (v===null) continue;
+    const xx = i/(n-1)*W, yy = y(v);
+    if (i===0) ctx.moveTo(xx,yy); else ctx.lineTo(xx,yy);
+  }
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.4*(window.devicePixelRatio||1);
+  ctx.stroke();
+  ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+  ctx.fillStyle = 'rgba(88,166,255,.13)'; ctx.fill();
+
+  // pinned / selected marker
+  const sel = parseFloat($('#dffreq').value);
+  if (!isNaN(sel)){
+    const xx = Math.round((sel-f0)/span*W)+.5;
+    ctx.strokeStyle = PINNED!==null ? '#3fb950' : '#d29922';
+    ctx.setLineDash([4,3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(xx,0); ctx.lineTo(xx,H); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ---- waterfall -------------------------------------------------------
+let fallImg = null, fallCtx = null;
+function pushFall(){
+  const c = $('#fall'); const ctx = fit(c);
+  const W = c.width, H = c.height;
+  if (!fallImg || fallImg.width !== W){
+    fallImg = ctx.createImageData(W, 1);
+    ctx.fillStyle = '#010409'; ctx.fillRect(0,0,W,H);
+  }
+  if (!SPEC || !SPEC.levels) return;
+  // scroll down by one row, then draw the new row on top
+  ctx.drawImage(c, 0, 0, W, H-1, 0, 1, W, H-1);
+  const L = SPEC.levels, n = L.length, d = fallImg.data;
+  for (let x=0; x<W; x++){
+    const v = L[Math.min(n-1, Math.floor(x/W*n))];
+    const t = v===null ? 0 : (v - (REF-RNG))/RNG;
+    const [r,g,b] = heat(t);
+    d[x*4]=r; d[x*4+1]=g; d[x*4+2]=b; d[x*4+3]=255;
+  }
+  ctx.putImageData(fallImg, 0, 0);
+}
+
+// ---- polar bearing plot ---------------------------------------------
+function drawPolar(){
+  const c = $('#polar'), ctx = fit(c), W = c.width, H = c.height;
+  const R = Math.min(W,H)/2 - 18*(window.devicePixelRatio||1);
+  const cx = W/2, cy = H/2;
+  ctx.clearRect(0,0,W,H);
+  const dpr = window.devicePixelRatio||1;
+
+  ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+  for (const f of [1,.66,.33]){
+    ctx.beginPath(); ctx.arc(cx,cy,R*f,0,Math.PI*2); ctx.stroke();
+  }
+  ctx.fillStyle = '#6e7681'; ctx.font = `${10*dpr}px monospace`;
+  ctx.textAlign='center';
+  for (const [lab,a] of [['0',0],['90',90],['180',180],['270',270]]){
+    const th = (a-90)*Math.PI/180;
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(th)*R, cy+Math.sin(th)*R);
+    ctx.strokeStyle='#21262d'; ctx.stroke();
+    ctx.fillText(lab, cx+Math.cos(th)*(R+9*dpr), cy+Math.sin(th)*(R+9*dpr)+3*dpr);
+  }
+
+  if (!LAST || LAST.error) return;
+
+  // element boresights
+  if (LAST.azimuths_deg){
+    ctx.strokeStyle = '#30363d';
+    for (const a of LAST.azimuths_deg){
+      const th=(a-90)*Math.PI/180;
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(th)*R*0.95, cy+Math.sin(th)*R*0.95);
+      ctx.lineTo(cx+Math.cos(th)*R*1.04, cy+Math.sin(th)*R*1.04);
+      ctx.lineWidth=2*dpr; ctx.stroke();
+    }
+  }
+
+  // likelihood curve
+  if (LAST.polar && LAST.polar.length){
+    ctx.beginPath();
+    LAST.polar.forEach(([a,v],i)=>{
+      const th=(a-90)*Math.PI/180, r=R*(0.12+0.88*v);
+      const x=cx+Math.cos(th)*r, y=cy+Math.sin(th)*r;
+      i? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    });
+    ctx.closePath();
+    ctx.fillStyle='rgba(88,166,255,.16)'; ctx.fill();
+    ctx.strokeStyle='#58a6ff'; ctx.lineWidth=1.4*dpr; ctx.stroke();
+  }
+
+  // the bearing itself
+  const th=(LAST.bearing_deg-90)*Math.PI/180;
+  ctx.beginPath(); ctx.moveTo(cx,cy);
+  ctx.lineTo(cx+Math.cos(th)*R, cy+Math.sin(th)*R);
+  ctx.strokeStyle='#f85149'; ctx.lineWidth=2.4*dpr; ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx+Math.cos(th)*R, cy+Math.sin(th)*R, 3.4*dpr,0,Math.PI*2);
+  ctx.fillStyle='#f85149'; ctx.fill();
+}
+
+// ---- DF panel --------------------------------------------------------
+function showDF(d){
+  $('#dferr').textContent = '';
+  if (!d || d.error){ $('#dferr').textContent = d && d.error ? d.error : ''; return; }
+  LAST = d;
+  $('#bearing').textContent = d.bearing_deg.toFixed(1) + '°';
+  $('#bsub').textContent = d.calibrated ? 'calibrated' : 'relative — not true north';
+  $('#d_f').textContent = (d.freq_hz/1e6).toFixed(3)+' MHz';
+  $('#d_c').textContent = d.confidence.toFixed(2);
+  $('#d_n').textContent = d.n;
+  $('#d_m').textContent = d.mean_deg===null?'—':d.mean_deg.toFixed(1)+'°';
+  const s = d.std_deg;
+  const w = d.sweep_std_deg;
+  $('#d_w').innerHTML = (w===null||w===undefined) ? '—' :
+     `<span class="${w<3?'ok':w<10?'warn':'bad'}">${w.toFixed(1)}°</span>`
+     + ` <span style="color:var(--dim)">/${d.sweeps}</span>`;
+  $('#d_s').innerHTML = s===null ? '—' :
+     `<span class="${s<5?'ok':s<15?'warn':'bad'}">${s.toFixed(1)}°</span>`;
+
+  // Snapping check, same logic as sigmon.py --stability-report: a fit with no
+  // angular discrimination sits on an element boresight and repeats perfectly,
+  // which looks like precision and is not.
+  let note = '';
+  if (d.azimuths_deg && d.azimuths_deg.length){
+    const sp = 360/d.azimuths_deg.length;
+    const off = Math.min(...d.azimuths_deg.map(a=>{
+      let x = Math.abs(((a - d.bearing_deg + 180)%360+360)%360 - 180); return x;}));
+    if (off < sp/8) note = `⚠ ${off.toFixed(1)}° from an element boresight — the fit `
+      + `may be reporting "loudest antenna" rather than interpolating. Real `
+      + `resolution is then ~${sp.toFixed(0)}°, whatever the std says.`;
+  }
+  if (s !== null && s < 5 && !note) note = 'Repeatable. Note that repeatability is '
+    + 'not accuracy: bearings are relative without a calibration.';
+  $('#dfnote').textContent = note;
+
+  const rows = d.channels.map((ch,i)=>{
+    const rel = d.levels_db[i] - Math.max(...d.levels_db);
+    const w = Math.max(0, 100 + rel*2.2);
+    return `<div style="margin:4px 0">
+      <div style="display:flex;justify-content:space-between">
+        <span>ch${ch} <span style="color:var(--dim)">@${d.azimuths_deg[i].toFixed(0)}°</span></span>
+        <span>${d.levels_db[i].toFixed(1)} dB</span></div>
+      <div class="bar"><i style="width:${w}%"></i></div></div>`;
+  }).join('');
+  $('#levels').innerHTML = rows;
+  drawPolar();
+}
+
+// ---- networking ------------------------------------------------------
+async function poll(){
+  try{
+    const r = await fetch('/api/spectrum?since=' + (SPEC?SPEC.seq:-1));
+    const d = await r.json();
+    if (d && d.levels){ SPEC = d; drawSpec(); pushFall(); }
+  }catch(e){}
+  setTimeout(poll, 120);
+}
+async function pollState(){
+  try{
+    const d = await (await fetch('/api/state')).json();
+    STATE = d;
+    $('#st').textContent = d.status;
+    $('#st').className = d.status==='running'?'ok':d.status==='failed'?'bad':'warn';
+    $('#ants').textContent = d.live.length ? d.live.join(',') : '—';
+    $('#ms').textContent = d.sweep_ms + ' ms';
+    $('#store').innerHTML = d.using_mongo
+      ? '<span class="ok">mongo</span>' : '<span class="warn">jsonl</span>';
+    if (d.balance) $('#balnote').textContent =
+      'auto-balance applied (dB): ' + d.live.map((c,i)=>
+        'ch'+c+' '+(d.balance[i]>=0?'+':'')+d.balance[i].toFixed(1)).join('  ')
+      + ' — blind gain equalisation, not a calibration.';
+    if (d.overload) $('#cfgerr').textContent =
+      'ADC OVERLOAD — levels and bearings are both wrong. Lower the gain.';
+    else if (d.error) $('#cfgerr').textContent = d.error;
+    else $('#cfgerr').textContent = '';
+    drawAntennas(d);
+  }catch(e){ $('#st').textContent='offline'; $('#st').className='bad'; }
+  setTimeout(pollState, 1000);
+}
+
+// ---- manual antenna selection ----------------------------------------
+// Rebuilt only when something actually changed: this runs once a second and
+// replacing the buttons every time would fight with the click that is being
+// made on them.
+let ANTSIG = null;
+function drawAntennas(d){
+  if (!d.ports) return;
+  const sig = JSON.stringify([d.ports, d.manual_port, d.null_port, d.live,
+                              d.spectrum_channel, d.spectrum_paused]);
+  if (sig === ANTSIG) return;
+  ANTSIG = sig;
+  const row = $('#antrow');
+  row.innerHTML = '';
+  const mk = (label, port, title) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title || '';
+    const on = (d.manual_port === port);
+    if (on) b.className = 'primary';
+    b.onclick = async () => {
+      $('#anterr').textContent = '';
+      try{
+        const r = await fetch('/api/antenna', {method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({port: on ? null : port})});
+        const j = await r.json();
+        if (j.error) $('#anterr').textContent = j.error;
+        ANTSIG = null;                       // force a redraw on the next poll
+      }catch(e){ $('#anterr').textContent = String(e); }
+    };
+    row.appendChild(b);
+  };
+  mk('auto', null, 'let DF commutate the switch');
+  for (const p of d.ports){
+    const isNull = (p === d.null_port);
+    const live = (d.live || []).includes(p);
+    mk(isNull ? ('port ' + p + ' · no antenna') : ('ant ' + p), p,
+       isNull ? 'the no-signal position: sync marker and noise reference'
+              : (live ? 'antenna detected on this port'
+                      : 'this port did not read as live'));
+  }
+  const note = [];
+  if (d.switch_desc) note.push(d.switch_desc);
+  if (d.spectrum_paused) note.push('spectrum paused while a DF is pinned');
+  else if (d.spectrum_channel !== null && d.spectrum_channel !== undefined)
+    note.push('spectrum is showing port ' + d.spectrum_channel);
+  if (d.null_ok === false) note.push(
+    'WARNING: port ' + d.null_port + ' reads as LIVE but is declared the '
+    + 'no-signal position — commutated DF cannot sync on it.');
+  if (d.nvs_writes !== null && d.nvs_writes !== undefined)
+    note.push(d.nvs_writes + ' switch settings written this session');
+  $('#antnote').textContent = note.join(' · ');
+}
+async function pollDF(){
+  if (PINNED !== null){
+    try{
+      const d = await (await fetch('/api/last_df')).json();
+      if (d && d.bearing_deg !== undefined) showDF(d);
+    }catch(e){}
+  }
+  setTimeout(pollDF, 700);
+}
+
+// ---- interaction -----------------------------------------------------
+function freqAt(ev, c){
+  if (!SPEC) return null;
+  const r = c.getBoundingClientRect();
+  const t = (ev.clientX - r.left)/r.width;
+  return (SPEC.f0 + t*(SPEC.f1-SPEC.f0))/1e6;
+}
+for (const id of ['#spec','#fall']){
+  const c = $(id);
+  c.addEventListener('mousemove', e=>{
+    const f = freqAt(e,c);
+    $('#cursor').textContent = f===null?'—':f.toFixed(3)+' MHz';
+  });
+  c.addEventListener('click', e=>{
+    const f = freqAt(e,c); if (f===null) return;
+    $('#dffreq').value = f.toFixed(3);
+    drawSpec();
+  });
+}
+$('#dfgo').onclick = async ()=>{
+  const f = parseFloat($('#dffreq').value);
+  if (isNaN(f)) { $('#dferr').textContent='enter a frequency'; return; }
+  $('#dfgo').disabled = true; $('#dfgo').textContent = 'measuring…';
+  try{
+    const d = await (await fetch('/api/df',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({freq_hz:f*1e6})})).json();
+    showDF(d);
+  }catch(e){ $('#dferr').textContent = String(e); }
+  $('#dfgo').disabled = false; $('#dfgo').textContent = 'DF once';
+};
+$('#dfpin').onclick = async ()=>{
+  const f = parseFloat($('#dffreq').value);
+  const on = PINNED === null;
+  if (on && isNaN(f)) { $('#dferr').textContent='enter a frequency'; return; }
+  const d = await (await fetch('/api/pin',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({freq_hz: on ? f*1e6 : null})})).json();
+  PINNED = d.pinned;
+  $('#dfpin').textContent = PINNED===null ? 'pin ▶' : 'pinned ■';
+  $('#dfpin').className = PINNED===null ? '' : 'on';
+  drawSpec();
+};
+$('#apply').onclick = async ()=>{
+  const body = {start:parseFloat($('#f0').value)*1e6,
+                stop:parseFloat($('#f1').value)*1e6,
+                gain:parseFloat($('#gain').value)};
+  const r = await fetch('/api/config',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  $('#cfgerr').textContent = d.error || '';
+  fallImg = null;                       // span changed: waterfall history is stale
+};
+for (const id of ['#ref','#rng']){
+  $(id).addEventListener('change', ()=>{
+    REF = parseFloat($('#ref').value); RNG = parseFloat($('#rng').value);
+    fallImg = null; drawSpec();
+  });
+}
+window.addEventListener('resize', ()=>{ fallImg=null; drawSpec(); drawPolar(); });
+
+poll(); pollState(); pollDF(); drawPolar();
+</script>
+</body>
+</html>
