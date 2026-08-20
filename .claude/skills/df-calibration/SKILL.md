@@ -165,7 +165,46 @@ likely reading — near-zero pattern depth across the board means **the sweep di
 not cover a real revolution**, or the array did not turn. Check the scale before
 condemning any hardware.
 
-## CALIBRATE AT 1810 MHz, NOT FM. And the array is ANTICLOCKWISE.
+## THE ANSWER: calibrate at 1810 MHz. `dfcal.1810.json` is the accepted file.
+
+```bash
+./dfcal.py 1810.0M --ports 1,2,3,4,5,6,7 --null-port 8 \
+    --rotates array --dir-plus cw --steps-per-rev 16000 --gain 40 \
+    --angles 36 --check-angles 12 --repeats 3 --out dfcal.1810.json --save
+```
+
+**1810 MHz is the only setting that converged.** It is not "1.8 GHz" generally —
+1815 MHz, five MHz away, gives rms 50.5 deg and slope -0.426. The carrier
+matters; re-survey before assuming one still works.
+
+| | 96 MHz | 1833 MHz | **1810 MHz** |
+|---|---|---|---|
+| beamwidth fitted | 10 deg (grid edge) | 180 deg (grid edge) | **66 deg** (vs 68 theoretical) |
+| pattern depth | 1.7-4.3 dB | 10.2-13.4 dB | **14.7-16.8 dB** |
+| first harmonic | 0.0-1.1 dB | 1.1-1.5 dB | **3.7-4.9 dB** |
+| gain spread | 16.5 dB | 1.0 dB | **1.1 dB** |
+| calibrated rms | 34-74 deg | 66.9 deg | **22.2 deg** |
+| **slope** (must be -1) | -0.889 | -1.408 | **-0.988** |
+
+**Judge a run by `slope`, then by rms — never by rms alone.** 1810 MHz is the
+first run to raise no slope warning: the bearing tracks the stage one-for-one,
+so there is no stretch and no mirror. A fitted beamwidth that is NOT at a grid
+edge (10 or 180) is the other tell that the fit is real.
+
+Two independent estimators agree, which is why this result is believed:
+`dfcal.solve()` gives spacing sd **5.2 deg**, and an h1 fundamental-phase fit
+over 16 LTE1800 carriers gives **5.9 deg** — different estimator, different
+sweeps, same answer, and both say **anticlockwise, ring order [1,7,6,5,4,3,2]**.
+
+Accepted files (both force-added past .gitignore):
+- **`dfcal.1810.json`** — use this. Validated on 12 hold-out angles.
+- `dfcal.LTE1800-h1.json` — h1 fit, better internal ring consistency but NO
+  hold-out error bar. Cross-check only.
+
+Residual 22.2 deg rms is honest, not good. `ring residual 2.05 dB` says one
+identical pattern per element does not fully describe this array.
+
+## Why FM never worked, and why "higher" is not the lesson
 
 **Established 2026-08-20 by rotation measurement.** The array is seven
 near-uniformly spaced elements wired **anticlockwise**, and it is only
@@ -182,7 +221,6 @@ Measured spacings at the best setting: `[41.7, 49.8, 49.8, 47.8, 58.9, 52.0,
 60.0]` against an ideal 51.43. **The array geometry is good.** Every earlier
 "scrambled harness" verdict was an artefact.
 
-### Why FM cannot work here, ever
 
 The ring radius is **under 10 cm**. At 96 MHz that is ~0.03 wavelengths — the
 array is electrically a point, so the elements have no azimuthal
