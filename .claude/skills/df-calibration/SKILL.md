@@ -32,43 +32,38 @@ The stage position counter is **per-process** — it starts at 0 on every
 `stepper.py` invocation. There is no index switch. Only relative angles within
 one process are meaningful.
 
-## BLOCKER: rfscan.py is missing from this machine
+## rfscan.py — now in-tree, keep it that way
 
-Every radio path dies at import. `dfcal.py` catches it and says so plainly;
-`sigmon.py`/`webui.py`/`dfstream.py` all need it too. Confirmed absent from the
-tree, from `sigmon.zip`, and from every `__pycache__` — and `~/clone-setup.sh`
-is 2725 bytes of pure whitespace, so it restores nothing.
+`rfscan.py` provides `Receiver`, `welch_psd`, `band_power_db`, `parse_freq`,
+`plan_segments`, `default_fpga` and `RFSwitch`. Every radio path imports it and
+dies at import without it.
 
-The importers add a sibling `uarf/` directory to `sys.path`, so the expected
-home is **`/home/uarf/rfscan.py`** (from `dirname(dirname(_HERE))/uarf`).
+It originally lived **only** in a sibling `uarf/` directory that the importers
+add to `sys.path` (`dirname(dirname(_HERE))/uarf` → `/home/uarf`), and was
+absent from this repo — so `dfcal.py` failed instantly with a plain message
+saying so. It is **now committed at the repo root**, which also fixes the
+import for free: Python puts a script's own directory on `sys.path`, and
+`dfcal.py` — unlike `sigmon.py` and `webui.py` — has no `uarf/` path block of
+its own. Do not delete it, and do not "fix" dfcal.py by adding a path hack.
 
-**Check for it before planning any radio work.** Everything below is reachable
-without it: `stepper.py` entirely, and `dfcal.py --simulate`.
+If it ever goes missing again, `dfstream.batch_band_power_db` (dfstream.py:234)
+is pure numpy and documents itself as using the **same normalisation** as
+`welch_psd` + `band_power_db` — that is the reference any reimplementation must
+match, verifiable with no radio attached. A wrong power normalisation yields a
+calibration that is stable, confident and wrong.
 
-### The contract a replacement must satisfy
+## Preflight numbers that count as healthy
 
-```python
-Receiver(usrp, chan, rate, gain, antenna, lo_frac=0.25)
-    .rate .usrp .clipped .peak
-    .tune(freq) -> centre_hz      # offset tuning; returns the ACTUAL centre
-    .capture(nsamps) -> complex64
-welch_psd(x, fs, rbw) -> (f, P)   # full-scale normalised
-band_power_db(f, P, offset_hz, rbw) -> dB
-parse_freq(s) -> hz               # accepts "96.0M"
-plan_segments(start, stop, rate, ...) -> centres
-default_fpga() -> path | None     # resolved RELATIVE TO ITSELF, not the caller
-RFSwitch(usrp, mask=...)          # only for --switch usrp; the esp32 path skips it
-```
+Measured on this rig at 96.0 MHz, all four checks green:
 
-`dfstream.batch_band_power_db` (dfstream.py:234) documents itself as using the
-**same normalisation** as `welch_psd` + `band_power_db` and is pure numpy — so
-it is the reference to match a reimplementation against, and the way to verify
-one without a radio. `dfstream.open_usrp()` returns `(usrp, rfscan)` and builds
-the device string as `type=b200,fpga=<default_fpga()>`.
+| check | reading | means |
+|---|---|---|
+| switch | 22.1 dB between-port spread vs **0.28 dB** within-port scatter | the switch really commutates the RF |
+| null | port 8 sits **16.2 dB** below the median antenna | the dead port is genuinely dead |
+| signal | 18.3 dB contrast, 61 cycles, 13.8 dB port spread, null −77.8 dBFS | the reference is strong and segmentable |
+| stage | 200 steps moved the port pattern **1.30 dB** (common mode removed) | the stage actually turned |
 
-Do not hand-wave this module. A wrong power normalisation yields a calibration
-that is stable, confident and wrong — the exact failure this tool exists to
-prevent.
+A `--check` run costs about a minute and moves the array only 200 steps.
 
 ## The standard run
 
@@ -123,6 +118,53 @@ new or regeared, bracket it mechanically first — it is faster, and a sane
 turn direction and cable-wrap limit are cheap to observe and impossible to
 infer.
 
+## --find-scale locked onto HALF the true period here. Cross-check it.
+
+**Observed on this rig, 96.0 MHz, 2026-08-20.** `--find-scale` reported
+**8011 steps/rev**; the mechanical bootstrap said **16000**. The ratio was
+**1.9973** and `8011 x 2 = 16022`, i.e. within 0.14% of a clean factor of two.
+It is the harmonic lock the README warns about ("returned revolutions out by
+factors of 2 to 4"). The operator's "24000 steps = 1.5 turns" settled it: at
+8011 steps/rev that move would have been exactly 3.00 turns.
+
+Two tells, both visible in the run log, and neither is "the fit failed":
+
+- The adaptive search **never identified one element spacing.** It printed
+  `still searching` at every checkpoint out to the `4 x guess` hard stop and
+  never printed `one element spacing at N steps`. When that line is absent the
+  scale was extrapolated, not bracketed — treat the number as unproven.
+- **`ring coherence 0.668`**, against 0.997 in `--simulate`. But do not rely on
+  coherence alone: the README's whole point is that a wrong period can score
+  0.997 because the phases stay perfectly ringed.
+
+The damage is total and silent. A half-turn believed to be a full turn stretches
+every azimuth 2x, so the run reported a 175.4 deg worst departure from a uniform
+ring, a scrambled port order, beamwidth pinned at the **10 deg grid edge** with a
+`-5 dB` floor, and calibrated **rms 34.06 deg at mean confidence 0.00** — while
+`slope` still read a healthy `-1.008`. **Slope alone does not vindicate a run.**
+
+### So: always bracket the scale mechanically first, then force it
+
+```bash
+./dfcal.py <freq> ... --steps-per-rev 16000 --angles 36 --check-angles 12
+```
+
+Passing `--steps-per-rev` skips `find_scale` entirely. Use `--find-scale` only
+to *cross-check* a known-good mechanical figure, and reject its answer if it is
+a near-exact integer ratio of the mechanical one.
+
+**`--save` writes the bad scale into `stepper.json`.** After a suspect run,
+fix that file before anything else uses it.
+
+## Sanity floor: pattern depth
+
+A working element modulates roughly **10 dB** over a turn; a dead one about
+**1.4 dB**. In the bad run above *every* port sat between 1.4 and 3.9 dB with
+first harmonics of 0.4-1.2 dB. Seven simultaneously dead elements is not the
+likely reading — near-zero pattern depth across the board means **the sweep did
+not cover a real revolution**, or the array did not turn. Check the scale before
+condemning any hardware.
+
 ## The two facts rotation cannot supply
 
 - `--rotates {array,source}` — the level data is identical up to a mirror.
@@ -156,6 +198,49 @@ Expected: steps/rev within 0.15%, gains 0.04 dB rms, angles 0.9° rms,
 permutation sense correct in 48/48. If `--simulate` degrades, the solver broke,
 not the rig. `dfstream.py`'s segmentation is pure numpy and runs against a
 recorded `--iq-out` file, so DF logic is testable with no radio attached.
+
+## USB power is a real failure mode on this Pi — check the bus first
+
+**Observed 2026-08-20.** Mid-sweep the B210 died with
+`LIBUSB_ERROR_NO_DEVICE`, then `Failed to read EEPROM (-9)`. It was not a
+radio fault: plugging a **CUAV-X7 flight controller** into the same Pi pushed
+the B210 off USB 3.0 (Bus 005) onto a shared USB 2.0 bus (Bus 004), where it
+and the ESP32 switch both began re-enumerating continuously.
+
+Diagnose it by watching the **device number climb** — it increments on every
+re-enumeration:
+
+```bash
+watch -n2 'lsusb | grep -E "2500:0020|303a:1001"'
+```
+
+Numbers rising over minutes (007 -> 031, or 012 -> 018) mean the link is
+flapping. A `USBDEVFS_RESET` ioctl will NOT fix it; the cause is power.
+
+- Keep the **B210 on a USB 3.0 port** (Bus 005 here). It needs the bandwidth
+  for 16 MS/s regardless, and the 3.0 port has the better supply.
+- Give the flight controller its own supply or a **powered hub**.
+- A dropped radio mid-sweep wastes the whole turn — check the bus is quiet
+  before starting a run that takes minutes.
+
+## Absolute bearings from the flight controller
+
+A CUAV-X7 (ArduPilot, USB `1209:5740`) exposes MAVLink at
+`/dev/serial/by-id/usb-ArduPilot_CUAV-X7_*-if00`. **Its forward arrow is
+aligned with RF port 1**, so its compass heading gives port 1's true bearing —
+which is exactly what `--true-bearing` needs to turn a relative calibration
+absolute.
+
+`pymavlink` is NOT installed and there is no `pip` on this box. A dependency-free
+listener works, but **frame on CRC, not on the 0xFD/0xFE start byte** — start
+bytes occur inside payloads, and naive framing yielded impossible message ids
+(15128636) and a fabricated heading of 0. With MAVLink CRC
+(X25/MCRF4XX + per-message CRC_EXTRA) validation, 46 clean `VFR_HUD` frames
+gave **heading = 1 deg**. Working listener:
+`scratchpad/mavlisten2.py`.
+
+Keep it **read-only**. Do not transmit to an autopilot to request streams
+without asking the operator first.
 
 ## Radio contention
 
