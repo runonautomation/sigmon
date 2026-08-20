@@ -165,6 +165,82 @@ likely reading — near-zero pattern depth across the board means **the sweep di
 not cover a real revolution**, or the array did not turn. Check the scale before
 condemning any hardware.
 
+## CALIBRATE AT 1810 MHz, NOT FM. And the array is ANTICLOCKWISE.
+
+**Established 2026-08-20 by rotation measurement.** The array is seven
+near-uniformly spaced elements wired **anticlockwise**, and it is only
+recoverable in the LTE1800 band.
+
+| reference | ring coherence | spacing sd | rms angle err |
+|---|---|---|---|
+| 96 MHz (FM) | 0.754 | 38.5 deg | ~43 deg |
+| 1833 MHz single | 0.969 | 23.8 deg | ~37 deg |
+| **1810 MHz single** | **0.997** | — | **9.2 deg** |
+| LTE1800, 16 freqs averaged | 0.997 | **5.9 deg** | 10.8 deg |
+
+Measured spacings at the best setting: `[41.7, 49.8, 49.8, 47.8, 58.9, 52.0,
+60.0]` against an ideal 51.43. **The array geometry is good.** Every earlier
+"scrambled harness" verdict was an artefact.
+
+### Why FM cannot work here, ever
+
+The ring radius is **under 10 cm**. At 96 MHz that is ~0.03 wavelengths — the
+array is electrically a point, so the elements have no azimuthal
+discrimination and there is no geometry to recover. Measured pattern depth
+scaled 1.7-4.3 dB (96 MHz) -> 3.3-7.8 (105) -> **10.2-13.4 dB (1833)** on
+identical hardware, which also proves the directivity comes from array
+structure, not from the elements themselves.
+
+Do **not** conclude from this that "higher is better without limit".
+`h1` — the ONLY component that encodes a mounting angle — stayed at ~1.5 dB per
+port at *every* frequency. The extra depth at 1.8 GHz went into high harmonics
+(diffuse multipath), not into bearing information. What actually improved at
+1.8 GHz is that the h1 **phases** line up in correct ring order and sense.
+
+### ALWAYS test both rotational senses
+
+This cost real time. A ring-coherence statistic computed for one sense only is
+meaningless on an array wired the other way, and it does not fail loudly — it
+returns a low number and a shuffled "ring order", which reads exactly like a
+scrambled feed harness. The same 1833 MHz data gave:
+
+    CW  0.324   <- looks like a broken array
+    CCW 0.969   <- the truth
+
+Compute both, take the larger, and report which. `dfcal` itself gets this
+right and prints "the array is wired ANTICLOCKWISE".
+
+### Fitting h1 alone beats fitting the whole pattern
+
+`dfcal` fits a single-lobe element pattern to the whole measured cut. At this
+site that cut is dominated by multipath, so the beamwidth fit pins at a grid
+edge (10 deg at 96 MHz, 180 deg at 1833) and the result is unusable even when
+the underlying geometry is recoverable. Taking only the **complex fundamental**
+per port and reading its phase gave 5.9 deg spacing sd from the same sweeps.
+Use `scratchpad/harmonics.py` / `multifreq1800.py` as the pattern for this.
+
+## Choosing a reference: what the band survey found
+
+| band | best | over floor | jitter | verdict |
+|---|---|---|---|---|
+| FM | 92.0 MHz | +13.7 dB | 0.08 dB | steady but electrically useless here |
+| UHF TV | 602-700 MHz | +5 dB | 0.1 dB | too weak |
+| **LTE800** | **815 MHz** | **+40.1 dB** | 1.60 dB | strongest; preflight fails, see below |
+| **LTE1800** | **1810-1833 MHz** | +10-13 dB | ~2 dB | **use this** |
+| LTE2100 | 2114 MHz | +3.6 dB | 0.2 dB | too weak |
+| 2.4 ISM | 2468 MHz | +40.2 dB | **17.6 dB** | WiFi — bursty, never usable |
+
+LTE downlink jitter of 1-2 dB sounds disqualifying but is not: all seven ports
+come from ONE capture, so traffic variation is common-mode across ports and
+`common_mode()` removes it exactly. Bursty WiFi is different — there the ports
+see *different packets*, which is the failure the README documents.
+
+**815 MHz fails preflight** with `contrast is 6.1 dB on the wideband envelope`
+(needs >10) — the stream segmenter cannot separate antenna slots from the null.
+The fix is counter-intuitive: **raise** `--gain`. The null is receiver noise,
+which grows more slowly with gain than the antennas do, so low gain compresses
+the very contrast the sync needs. Gain 30 failed; try 45-50.
+
 ## The two facts rotation cannot supply
 
 - `--rotates {array,source}` — the level data is identical up to a mirror.
